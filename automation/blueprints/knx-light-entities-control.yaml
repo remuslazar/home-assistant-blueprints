@@ -23,11 +23,13 @@ blueprint:
           domain: input_boolean
       default: []
     switch_address:
-      name: Switch group address
+      name: Switch group addresses (list)
       description: >
-        Group address for switching the lights on and off. DPT 1.001
-        Example: '1/0/1' (leave empty if unused)
-      default: ""
+        Optional list of group addresses for switching the lights on and off. DPT 1.001
+        Examples: ["1/0/1", "1/0/2"] or YAML list on multiple lines. Leave empty if unused.
+      selector:
+        object:
+      default: []
     dimm_address:
       name: Relative dimming group address
       description: >
@@ -153,12 +155,12 @@ trigger:
   - platform: state
     entity_id: !input light_entity
     id: "light_entity"
-  - trigger: knx.telegram
+  - platform: knx.telegram
     destination: !input switch_address
     outgoing: false
     group_value_read: false
     group_value_response: false
-    id: "switch_address"
+    id: switch_address
   - platform: event
     event_type: knx_event
     event_data:
@@ -289,33 +291,26 @@ action:
                 address: "{{ rgb_color_state_address }}"
  
     # KNX TELEGRAMS
+
+    # SWITCH command
+    - conditions:
+        - condition: trigger
+          id: switch_address
+      sequence:
+        action: |
+          {% if trigger.value == "on" %}
+            light.turn_on
+          {% else %}
+            light.turn_off
+          {% endif %}
+        target:
+          entity_id: "{{ light_entity }}"
+
     - conditions:
         condition: template
         value_template: "{{ trigger is defined and trigger.platform == 'event' and trigger.event.event_type == 'knx_event' and trigger.event.data.direction == 'Incoming' and trigger.event.data.destination != '' }}"
       sequence:
         - choose:
-
-          # SWITCH command
-          - conditions:
-              - condition: trigger
-                id: "switch_address"
-            sequence:
-              - choose:
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.data | int(default=0) == 0 }}"
-                  sequence:
-                    - service: light.turn_off
-                      target:
-                        entity_id: "{{ light_entity }}"
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.data | int(default=0) == 1 }}"
-                  sequence:
-                    - service: light.turn_on
-                      target:
-                        entity_id: "{{ light_entity }}"
-                        
           # SWITCH read
           - conditions:
               - condition: trigger
