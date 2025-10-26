@@ -189,12 +189,11 @@ trigger:
       telegramtype: GroupValueWrite
       direction: Incoming
     id: "rgb_color_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input switch_state_address
-      telegramtype: GroupValueRead
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input switch_state_address
+    outgoing: false
+    group_value_write: false
+    group_value_response: false
     id: "switch_state_address"
   - platform: event
     event_type: knx_event
@@ -225,13 +224,6 @@ action:
         - condition: trigger
           id: "initialize"
       sequence:
-        - if:
-            - condition: template
-              value_template: "{{ switch_state_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ switch_state_address }}"
         # DIMM
         - if:
             - condition: template
@@ -306,43 +298,41 @@ action:
         target:
           entity_id: "{{ light_entity }}"
 
+    # SWITCH read
+    - conditions:
+        - condition: trigger
+          id: switch_state_address
+      sequence:
+        - if:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "off"
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "unavailable"
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "unknown"
+          then:
+            - service: knx.send
+              data:
+                address: "{{ switch_state_address }}"
+                payload: 0
+                response: true
+          else:
+            - service: knx.send
+              data:
+                address: "{{ switch_state_address }}"
+                payload: 1
+                response: true
+
     - conditions:
         condition: template
         value_template: "{{ trigger is defined and trigger.platform == 'event' and trigger.event.event_type == 'knx_event' and trigger.event.data.direction == 'Incoming' and trigger.event.data.destination != '' }}"
       sequence:
         - choose:
-          # SWITCH read
-          - conditions:
-              - condition: trigger
-                id: "switch_state_address"
-              - condition: template
-                value_template: "{{ switch_state_address != '' }}"
-            sequence:
-              - if:
-                  - condition: or
-                    conditions:
-                      - condition: state
-                        entity_id: !input light_entity
-                        state: "off"
-                      - condition: state
-                        entity_id: !input light_entity
-                        state: "unavailable"
-                      - condition: state
-                        entity_id: !input light_entity
-                        state: "unknown"
-                then:
-                  - service: knx.send
-                    data:
-                      address: "{{ switch_state_address }}"
-                      payload: 0
-                      response: true
-                else:
-                  - service: knx.send
-                    data:
-                      address: "{{ switch_state_address }}"
-                      payload: 1
-                      response: true
-
           # DIM command
           - conditions:
               - condition: trigger
