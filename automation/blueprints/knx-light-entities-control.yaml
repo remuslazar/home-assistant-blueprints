@@ -195,12 +195,11 @@ trigger:
     group_value_write: false
     group_value_response: false
     id: "switch_state_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input value_state_address
-      telegramtype: GroupValueRead
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input value_state_address
+    outgoing: false
+    group_value_write: false
+    group_value_response: false
     id: "value_state_address"
   - platform: event
     event_type: knx_event
@@ -240,14 +239,6 @@ action:
             - service: knx.event_register
               data:
                 address: "{{ value_address }}"
-                type: "percent"
-        - if:
-            - condition: template
-              value_template: "{{ value_state_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ value_state_address }}"
                 type: "percent"
         # TEMPERATURE
         - if:
@@ -327,6 +318,17 @@ action:
                 address: "{{ switch_state_address }}"
                 payload: 1
                 response: true
+    # BRIGHTNESS read
+    - conditions:
+        - condition: trigger
+          id: "value_state_address"
+      sequence:
+        - service: knx.send
+          data:
+            address: "{{ value_state_address }}"
+            payload:
+              - "{{ state_attr(light_entity, 'brightness') | int(default=0) }}"
+            response: true
 
     - conditions:
         condition: template
@@ -454,20 +456,6 @@ action:
                           brightness: "{{ trigger.event.data.data[0] | int(default=255) }}"
                         target:
                           entity_id: "{{ light_entity }}"
-
-          # BRIGHTNESS read
-          - conditions:
-              - condition: trigger
-                id: "value_state_address"
-              - condition: template
-                value_template: "{{ value_state_address != '' }}"
-            sequence:
-              - service: knx.send
-                data:
-                  address: "{{ value_state_address }}"
-                  payload:
-                    - "{{ state_attr(light_entity, 'brightness') | int(default=0) }}"
-                  response: true
 
           # TEMPERATURE command
           - conditions:
