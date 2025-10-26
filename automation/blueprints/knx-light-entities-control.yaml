@@ -140,18 +140,6 @@ variables:
 
 
 trigger:
-  - platform: homeassistant
-    event: start
-    id: "initialize"
-  - platform: event
-    event_type: automation_reloaded
-    id: "initialize"
-  - platform: event
-    event_type: service_registered
-    event_data:
-      domain: knx
-      service: event_register
-    id: "initialize"
   - platform: state
     entity_id: !input light_entity
     id: "light_entity"
@@ -161,33 +149,29 @@ trigger:
     group_value_read: false
     group_value_response: false
     id: switch_address
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input dimm_address
-      telegramtype: GroupValueWrite
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input dimm_address
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
     id: "dimm_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input value_address
-      telegramtype: GroupValueWrite
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input value_address
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
     id: "value_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input temperature_address
-      telegramtype: GroupValueWrite
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input temperature_address
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
     id: "temperature_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input rgb_color_address
-      telegramtype: GroupValueWrite
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input rgb_color_address
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
     id: "rgb_color_address"
   - platform: knx.telegram
     destination: !input switch_state_address
@@ -201,78 +185,21 @@ trigger:
     group_value_write: false
     group_value_response: false
     id: "value_state_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input temperature_state_address
-      telegramtype: GroupValueRead
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input temperature_state_address
+    outgoing: false
+    group_value_write: false
+    group_value_response: false
     id: "temperature_state_address"
-  - platform: event
-    event_type: knx_event
-    event_data:
-      destination: !input rgb_color_state_address
-      telegramtype: GroupValueRead
-      direction: Incoming
+  - platform: knx.telegram
+    destination: !input rgb_color_state_address
+    outgoing: false
+    group_value_write: false
+    group_value_response: false
     id: "rgb_color_state_address"
 
 action:
   - choose:
-    # INITIALIZE
-    - conditions:
-        - condition: trigger
-          id: "initialize"
-      sequence:
-        # DIMM
-        - if:
-            - condition: template
-              value_template: "{{ dimm_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ dimm_address }}"
-        # BRIGHTNESS
-        - if:
-            - condition: template
-              value_template: "{{ value_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ value_address }}"
-                type: "percent"
-        # TEMPERATURE
-        - if:
-            - condition: template
-              value_template: "{{ temperature_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ temperature_address }}"
-                type: "color_temperature"
-        - if:
-            - condition: template
-              value_template: "{{ temperature_state_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ temperature_state_address }}"
-                type: "color_temperature"
-        # RGB COLOR
-        - if:
-            - condition: template
-              value_template: "{{ rgb_color_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ rgb_color_address }}"
-        - if:
-            - condition: template
-              value_template: "{{ rgb_color_state_address != '' }}"
-          then:
-            - service: knx.event_register
-              data:
-                address: "{{ rgb_color_state_address }}"
- 
     # KNX TELEGRAMS
 
     # SWITCH command
@@ -329,224 +256,203 @@ action:
             payload:
               - "{{ state_attr(light_entity, 'brightness') | int(default=0) }}"
             response: true
-
     - conditions:
-        condition: template
-        value_template: "{{ trigger is defined and trigger.platform == 'event' and trigger.event.event_type == 'knx_event' and trigger.event.data.direction == 'Incoming' and trigger.event.data.destination != '' }}"
+        - condition: trigger
+          id: "dimm_address"
       sequence:
         - choose:
-          # DIM command
-          - conditions:
-              - condition: trigger
-                id: "dimm_address"
-              - condition: template
-                value_template: "{{ dimm_address != '' }}"
-              - condition: template
-                value_template: "{{ not not dimm_entity }}"
-            sequence:
-              - choose:
-                # stop command
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.data == 0  or trigger.event.data.data == 8 }}"
-                  sequence:
-                      - service: input_boolean.turn_on
-                        data: {}
-                        target:
-                          entity_id: !input dimm_entity
-                # start dimm up command
-                - conditions:
-                    - condition: template
-                      value_template: "{{ 9 <= trigger.event.data.data <= 15 }}"
-                    - condition: template
-                      value_template: "{{ not dimm_no_on or states(light_entity) != 'off' }}"
-                  sequence:
-                      - variables:
-                          current_dimm_steps: "{{ ((255 - initial_brightness) / 255 * dimm_steps) | round(0, 'ceil') | int }}"
-                      - service: input_boolean.turn_off
-                        data: {}
-                        target:
-                          entity_id: !input dimm_entity
-                      - repeat:
-                          while:
-                            - condition: state
-                              entity_id: !input dimm_entity
-                              state: "off"
-                            - condition: template
-                              value_template: "{{ repeat.index <= current_dimm_steps }}"
-                          sequence:
-                            - service: light.turn_on
-                              data:
-                                brightness_step: "{{ dimm_step }}"
-                                transition: "{{ dimm_delay / 1000 }}"
-                              target:
-                                entity_id: "{{ light_entity }}"
-                            - delay:
-                                milliseconds: "{{ dimm_delay }}"
-                      - service: input_boolean.turn_off
-                        data: {}
-                        target:
-                          entity_id: !input dimm_entity
-                # start dimm down command
-                - conditions:
-                    - condition: template
-                      value_template: "{{ 1 <= trigger.event.data.data <= 7 }}"
-                  sequence:
-                      - variables:
-                          current_dimm_steps: "{% if dimm_no_off %}{{ (([(initial_brightness - 1), 0] | max) / 255 * dimm_steps) | round(0, 'ceil') | int }}{% else %}{{ (initial_brightness / 255 * dimm_steps) | round(0, 'ceil') | int }}{% endif %}"
-                      - service: input_boolean.turn_off
-                        data: {}
-                        target:
-                          entity_id: !input dimm_entity
-                      - repeat:
-                          while:
-                            - condition: state
-                              entity_id: !input dimm_entity
-                              state: "off"
-                            - condition: template
-                              value_template: "{{ repeat.index <= current_dimm_steps }}"
-                            - condition: template
-                              value_template: "{{ not dimm_no_off or state_attr(light_entity, 'brightness') | int(default=255) != 1 }}"
-                          sequence:
-                            - if:
-                                - condition: template
-                                  value_template: "{{ dimm_no_off and (state_attr(light_entity, 'brightness') | int(default=255) - dimm_step) < 1 }}"
-                              then :
-                                - service: light.turn_on
-                                  data:
-                                    brightness: 1
-                                    transition: "{{ dimm_delay / 1000 }}"
-                                  target:
-                                    entity_id: "{{ light_entity }}"
-                              else :                
-                                - service: light.turn_on
-                                  data:
-                                    brightness_step: "{{ -dimm_step }}"
-                                    transition: "{{ dimm_delay / 1000 }}"
-                                  target:
-                                    entity_id: "{{ light_entity }}"
-                                - delay:
-                                    milliseconds: "{{ dimm_delay }}"
-                      - service: input_boolean.turn_off
-                        data: {}
-                        target:
-                          entity_id: !input dimm_entity
-
-          # BRIGHTNESS command
-          - conditions:
-              - condition: trigger
-                id: "value_address"
-              - condition: template
-                value_template: "{{ value_address != '' }}"
-            sequence:
-              - choose:
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.data[0] | int(default=0) == 0 }}"
-                  sequence:
-                      - service: light.turn_off
-                        target:
-                          entity_id: "{{ light_entity }}"
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.data[0] | int(default=0) != 0 }}"
-                  sequence:
+            # stop command
+            - conditions:
+                - condition: template
+                  value_template: "{{ trigger.event.data.data == 0  or trigger.event.data.data == 8 }}"
+              sequence:
+                - service: input_boolean.turn_on
+                  data: { }
+                  target:
+                    entity_id: !input dimm_entity
+            # start dimm up command
+            - conditions:
+                - condition: template
+                  value_template: "{{ 9 <= trigger.event.data.data <= 15 }}"
+                - condition: template
+                  value_template: "{{ not dimm_no_on or states(light_entity) != 'off' }}"
+              sequence:
+                - variables:
+                    current_dimm_steps: "{{ ((255 - initial_brightness) / 255 * dimm_steps) | round(0, 'ceil') | int }}"
+                - service: input_boolean.turn_off
+                  data: { }
+                  target:
+                    entity_id: !input dimm_entity
+                - repeat:
+                    while:
+                      - condition: state
+                        entity_id: !input dimm_entity
+                        state: "off"
+                      - condition: template
+                        value_template: "{{ repeat.index <= current_dimm_steps }}"
+                    sequence:
                       - service: light.turn_on
                         data:
-                          brightness: "{{ trigger.event.data.data[0] | int(default=255) }}"
+                          brightness_step: "{{ dimm_step }}"
+                          transition: "{{ dimm_delay / 1000 }}"
                         target:
                           entity_id: "{{ light_entity }}"
+                      - delay:
+                          milliseconds: "{{ dimm_delay }}"
+                - service: input_boolean.turn_off
+                  data: { }
+                  target:
+                    entity_id: !input dimm_entity
+            # start dimm down command
+            - conditions:
+                - condition: template
+                  value_template: "{{ 1 <= trigger.event.data.data <= 7 }}"
+              sequence:
+                - variables:
+                    current_dimm_steps: "{% if dimm_no_off %}{{ (([(initial_brightness - 1), 0] | max) / 255 * dimm_steps) | round(0, 'ceil') | int }}{% else %}{{ (initial_brightness / 255 * dimm_steps) | round(0, 'ceil') | int }}{% endif %}"
+                - service: input_boolean.turn_off
+                  data: { }
+                  target:
+                    entity_id: !input dimm_entity
+                - repeat:
+                    while:
+                      - condition: state
+                        entity_id: !input dimm_entity
+                        state: "off"
+                      - condition: template
+                        value_template: "{{ repeat.index <= current_dimm_steps }}"
+                      - condition: template
+                        value_template: "{{ not dimm_no_off or state_attr(light_entity, 'brightness') | int(default=255) != 1 }}"
+                    sequence:
+                      - if:
+                          - condition: template
+                            value_template: "{{ dimm_no_off and (state_attr(light_entity, 'brightness') | int(default=255) - dimm_step) < 1 }}"
+                        then:
+                          - service: light.turn_on
+                            data:
+                              brightness: 1
+                              transition: "{{ dimm_delay / 1000 }}"
+                            target:
+                              entity_id: "{{ light_entity }}"
+                        else:
+                          - service: light.turn_on
+                            data:
+                              brightness_step: "{{ -dimm_step }}"
+                              transition: "{{ dimm_delay / 1000 }}"
+                            target:
+                              entity_id: "{{ light_entity }}"
+                          - delay:
+                              milliseconds: "{{ dimm_delay }}"
+                - service: input_boolean.turn_off
+                  data: { }
+                  target:
+                    entity_id: !input dimm_entity
 
-          # TEMPERATURE command
-          - conditions:
-              - condition: trigger
-                id: "temperature_address"
-              - condition: template
-                value_template: "{{ temperature_address != '' }}"
-            sequence:
-              - choose:
-                - conditions:
-                    - condition: template
-                      value_template: "{{ trigger.event.data.value | int(default=3000) != 0 }}"
-                  sequence:
-                      - service: light.turn_on
-                        target:
-                          entity_id: "{{ light_entity }}"
-                        data:
-                          kelvin: "{{ trigger.event.data.value | int(default=3000) }}"
+      # BRIGHTNESS command
+    - conditions:
+        - condition: trigger
+          id: "value_address"
+      sequence:
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ trigger.event.data.data[0] | int(default=0) == 0 }}"
+              sequence:
+                - service: light.turn_off
+                  target:
+                    entity_id: "{{ light_entity }}"
+            - conditions:
+                - condition: template
+                  value_template: "{{ trigger.event.data.data[0] | int(default=0) != 0 }}"
+              sequence:
+                - service: light.turn_on
+                  data:
+                    brightness: "{{ trigger.event.data.data[0] | int(default=255) }}"
+                  target:
+                    entity_id: "{{ light_entity }}"
 
-          # TEMPERATURE read
-          - conditions:
-              - condition: trigger
-                id: "temperature_state_address"
-              - condition: template
-                value_template: "{{ temperature_state_address != '' }}"
-            sequence:
-              - service: knx.send
-                data:
-                  address: "{{ temperature_state_address }}"
-                  type: color_temperature
-                  payload: "{{ state_attr(light_entity, 'color_temp_kelvin') | int(default=0) }}"
-                  response: true
+      # TEMPERATURE command
+    - conditions:
+        - condition: trigger
+          id: "temperature_address"
+      sequence:
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ trigger.event.data.value | int(default=3000) != 0 }}"
+              sequence:
+                - service: light.turn_on
+                  target:
+                    entity_id: "{{ light_entity }}"
+                  data:
+                    kelvin: "{{ trigger.event.data.value | int(default=3000) }}"
 
-          # RGB command
-          - conditions:
-              - condition: trigger
-                id: "rgb_color_address"
-              - condition: template
-                value_template: "{{ rgb_color_address != '' }}"
-            sequence:
-              # Turn off command (only 00)
-              - if:
-                  - condition: template
-                    value_template: "{{ trigger.event.data.data[0] | int(default=0) == 0 and trigger.event.data.data[1] | int(default=0) == 0 and trigger.event.data.data[2] | int(default=0) == 0 }}"
-                then:
-                  - service: light.turn_off
-                    target:
-                      entity_id: "{{ light_entity }}"
-              # RGB value command
-                else:
-                  - variables:
-                      brightness: "{{ ((trigger.event.data.data[0] * 0.299) + (trigger.event.data.data[1] * 0.587) + (trigger.event.data.data[2] * 0.114)) | int }}"
-                  - service: light.turn_on
-                    target:
-                      entity_id: "{{ light_entity }}"
-                    data:
-                      brightness: "{{ brightness }}"
-                      rgb_color:
-                        - "{{ trigger.event.data.data[0] | int(default=0) }}"
-                        - "{{ trigger.event.data.data[1] | int(default=0) }}"
-                        - "{{ trigger.event.data.data[2] | int(default=0) }}"
-          # RGB read
-          - conditions:
-              - condition: trigger
-                id: "rgb_color_state_address"
-              - condition: template
-                value_template: "{{ rgb_color_state_address != '' }}"
-            sequence:
-              # RGB value is set
-              - if:
-                  - condition: template
-                    value_template: "{{ state_attr(light_entity, 'rgb_color')[0] is defined and state_attr(light_entity, 'rgb_color')[1] is defined and state_attr(light_entity, 'rgb_color')[2] is defined }}"
-                then:
-                  - service: knx.send
-                    data:
-                      address: "{{ rgb_color_state_address }}"
-                      payload:
-                        - "{{ state_attr(light_entity, 'rgb_color')[0] | int(default=0) }}"
-                        - "{{ state_attr(light_entity, 'rgb_color')[1] | int(default=0) }}"
-                        - "{{ state_attr(light_entity, 'rgb_color')[2] | int(default=0) }}"
-                      response: true
-              # No RGB value is set
-                else:
-                  - service: knx.send
-                    data:
-                      address: "{{ rgb_color_state_address }}"
-                      payload:
-                        - 0
-                        - 0
-                        - 0
-                      response: true
+      # TEMPERATURE read
+    - conditions:
+        - condition: trigger
+          id: "temperature_state_address"
+      sequence:
+        - service: knx.send
+          data:
+            address: "{{ temperature_state_address }}"
+            type: color_temperature
+            payload: "{{ state_attr(light_entity, 'color_temp_kelvin') | int(default=0) }}"
+            response: true
+
+      # RGB command
+    - conditions:
+        - condition: trigger
+          id: "rgb_color_address"
+      sequence:
+        # Turn off command (only 00)
+        - if:
+            - condition: template
+              value_template: "{{ trigger.event.data.data[0] | int(default=0) == 0 and trigger.event.data.data[1] | int(default=0) == 0 and trigger.event.data.data[2] | int(default=0) == 0 }}"
+          then:
+            - service: light.turn_off
+              target:
+                entity_id: "{{ light_entity }}"
+          # RGB value command
+          else:
+            - variables:
+                brightness: "{{ ((trigger.event.data.data[0] * 0.299) + (trigger.event.data.data[1] * 0.587) + (trigger.event.data.data[2] * 0.114)) | int }}"
+            - service: light.turn_on
+              target:
+                entity_id: "{{ light_entity }}"
+              data:
+                brightness: "{{ brightness }}"
+                rgb_color:
+                  - "{{ trigger.event.data.data[0] | int(default=0) }}"
+                  - "{{ trigger.event.data.data[1] | int(default=0) }}"
+                  - "{{ trigger.event.data.data[2] | int(default=0) }}"
+      # RGB read
+    - conditions:
+        - condition: trigger
+          id: "rgb_color_state_address"
+      sequence:
+        # RGB value is set
+        - if:
+            - condition: template
+              value_template: "{{ state_attr(light_entity, 'rgb_color')[0] is defined and state_attr(light_entity, 'rgb_color')[1] is defined and state_attr(light_entity, 'rgb_color')[2] is defined }}"
+          then:
+            - service: knx.send
+              data:
+                address: "{{ rgb_color_state_address }}"
+                payload:
+                  - "{{ state_attr(light_entity, 'rgb_color')[0] | int(default=0) }}"
+                  - "{{ state_attr(light_entity, 'rgb_color')[1] | int(default=0) }}"
+                  - "{{ state_attr(light_entity, 'rgb_color')[2] | int(default=0) }}"
+                response: true
+          # No RGB value is set
+          else:
+            - service: knx.send
+              data:
+                address: "{{ rgb_color_state_address }}"
+                payload:
+                  - 0
+                  - 0
+                  - 0
+                response: true
 
     # STATE FEEDBACK
     - conditions:
