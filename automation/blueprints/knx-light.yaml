@@ -1,0 +1,130 @@
+blueprint:
+  name: KNX - Light Control
+  description: |
+    Use KNX to control an Home Assistant light entity
+  author: remuslazar
+  domain: automation
+  input:
+    light_entity:
+      name: Light Entity
+      description: >
+        Choose the light to control and expose with KNX
+      selector:
+        entity:
+          domain: light
+    switch_address:
+      name: Switch group addresses (list)
+      description: >
+        Optional list of group addresses for switching the lights on and off. DPT 1.001
+        Examples: ["1/0/1", "1/0/2"] or YAML list on multiple lines. Leave empty if unused.
+      selector:
+        object:
+      default: []
+    switch_state_address:
+      name: Switch state group address
+      description: >
+        Group address to send feedback of the state of the light. DPT 1.001
+        Example: '1/4/1' (leave empty if unused)
+      default: ""
+
+mode: parallel
+max_exceeded: silent
+
+variables:
+  light_entity: !input light_entity
+  switch_state_address: !input switch_state_address
+
+trigger:
+  - platform: state
+    entity_id: !input light_entity
+    id: "light_entity"
+  - platform: knx.telegram
+    destination: !input switch_address
+    type: switch
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
+    id: switch_address
+  - platform: knx.telegram
+    destination: !input switch_state_address
+    type: switch
+    outgoing: false
+    group_value_write: false
+    group_value_response: false
+    id: switch_state_address
+
+action:
+  - choose:
+    # KNX TELEGRAMS
+
+    # SWITCH command
+    - conditions:
+        - condition: trigger
+          id: switch_address
+      sequence:
+        action: |
+          {% if trigger.value == "on" %}
+            light.turn_on
+          {% else %}
+            light.turn_off
+          {% endif %}
+        target:
+          entity_id: "{{ light_entity }}"
+
+    # SWITCH read
+    - conditions:
+        - condition: trigger
+          id: switch_state_address
+      sequence:
+        - if:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "off"
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "unavailable"
+                - condition: state
+                  entity_id: !input light_entity
+                  state: "unknown"
+          then:
+            - service: knx.send
+              data:
+                address: "{{ switch_state_address }}"
+                payload: 0
+                response: true
+          else:
+            - service: knx.send
+              data:
+                address: "{{ switch_state_address }}"
+                payload: 1
+                response: true
+
+    # STATE FEEDBACK
+    - conditions:
+        - condition: trigger
+          id: "light_entity"
+      sequence:
+        # SWITCH change
+        - if:
+            - condition: template
+              value_template: "{{ trigger.to_state.state != trigger.from_state.state }}"
+          then:
+            - choose:
+              - conditions:
+                  condition: template
+                  value_template: "{{ trigger.to_state.state == 'off' }}"
+                sequence:
+                  - service: knx.send
+                    data:
+                      address: "{{ switch_state_address }}"
+                      payload: 0
+              - conditions:
+                  condition: template
+                  value_template: "{{ trigger.to_state.state == 'on' }}"
+                sequence:
+                  - service: knx.send
+                    data:
+                      address: "{{ switch_state_address }}"
+                      payload: 1
