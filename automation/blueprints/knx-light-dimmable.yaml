@@ -15,8 +15,8 @@ blueprint:
     switch_address:
       name: Switch group addresses (list)
       description: >
-        Optional list of group addresses for switching the lights on and off. DPT 1.001
-        Examples: ["1/0/1", "1/0/2"] or YAML list on multiple lines. Leave empty if unused.
+        A list of group addresses for switching the lights on and off. DPT 1.001
+        Examples: ["1/0/1", "1/0/2"] or YAML list on multiple lines.
       selector:
         object:
       default: []
