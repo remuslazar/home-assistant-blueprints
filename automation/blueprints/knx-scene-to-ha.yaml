@@ -11,9 +11,7 @@ blueprint:
     knx_scene_address:
       name: KNX Scene Group Address
       description: KNX GA that sends the scene recall (e.g., 1/2/3).
-      selector:
-        text:
-          multiline: false
+      default: ""
     ha_scene:
       name: Home Assistant Scene
       description: The HA scene to activate when the KNX scene is recalled.
