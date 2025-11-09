@@ -88,6 +88,7 @@ action:
               {% set sd = trigger.event.data.service_data if trigger.id == 'ha_scene_on' else {} %}
               {% set e = sd.entity_id %}
               {{ trigger.id == 'ha_scene_on'
+                 and (trigger.event.context.parent_id is none)
                  and (
                       (e is string and e == v_ha_scene)
                       or (e is list and (v_ha_scene in e))
@@ -99,5 +100,3 @@ action:
               address: !input knx_scene_address
               # DPT 18.001 recall: payload = scene_number - 1
               payload: "{{ (v_knx_scene_number | int) - 1 }}"
-
-    default: []
