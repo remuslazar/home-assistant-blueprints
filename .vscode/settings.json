@@ -1,0 +1,13 @@
+{
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
+      "automation/blueprints/**/*.yaml"
+    ]
+  },
+  "yaml.customTags": [
+    "!secret scalar",
+    "!include scalar",
+    "!input scalar",
+    "!env_var scalar"
+  ]
+}
