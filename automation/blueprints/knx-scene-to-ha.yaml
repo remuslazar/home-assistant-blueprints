@@ -100,4 +100,4 @@ action:
               # DPT 18.001 recall: payload = scene_number - 1
               payload: "{{ (v_knx_scene_number | int) - 1 }}"
 
-  - default: []
+    default: []
