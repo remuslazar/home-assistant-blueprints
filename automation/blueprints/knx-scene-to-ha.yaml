@@ -14,7 +14,6 @@ blueprint:
       selector:
         text:
           multiline: false
-          placeholder: "1/2/3"
     ha_scene:
       name: Home Assistant Scene
       description: The HA scene to activate when the KNX scene is recalled.
