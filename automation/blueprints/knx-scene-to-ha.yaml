@@ -39,6 +39,9 @@ trigger:
     group_value_response: false
     id: "knx_scene"
 
+variables:
+  knx_scene_number: !input knx_scene_number
+
 condition:
   # Ensure it's a Scene DPT (18.xxx)
   - condition: template
@@ -57,7 +60,7 @@ condition:
     value_template: >
       {{ trigger.value is defined
          and trigger.value.scene_number is defined
-         and trigger.value.scene_number == !input knx_scene_number }}
+         and trigger.value.scene_number == knx_scene_number }}
 
 action:
   - service: scene.turn_on
