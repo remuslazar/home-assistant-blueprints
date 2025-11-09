@@ -83,12 +83,18 @@ action:
 
       # ===== HA → KNX =====
       - conditions:
+          # Only mirror user/API initiated calls; skip automation-originated ones
+          - condition: template
+            value_template: >
+              {{ trigger.event.context is defined
+               and trigger.event.context.user_id is not none
+               and trigger.event.context.parent_id is none }}
+ 
           - condition: template
             value_template: >
               {% set sd = trigger.event.data.service_data if trigger.id == 'ha_scene_on' else {} %}
               {% set e = sd.entity_id %}
               {{ trigger.id == 'ha_scene_on'
-                 and (trigger.event.context.parent_id is none)
                  and (
                       (e is string and e == v_ha_scene)
                       or (e is list and (v_ha_scene in e))
