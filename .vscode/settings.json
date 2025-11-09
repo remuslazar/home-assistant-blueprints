@@ -1,13 +1,11 @@
 {
-  "yaml.schemas": {
-    "https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
-      "automation/blueprints/**/*.yaml"
-    ]
-  },
   "yaml.customTags": [
     "!secret scalar",
     "!include scalar",
     "!input scalar",
     "!env_var scalar"
-  ]
+  ],
+  "yaml.schemas": {
+    "https://www.schemastore.org/yamllint.json": "file:///Users/remuslazar/Developer/home-assistant-blueprints/automation/blueprints/knx-scene-to-ha.yaml"
+  }
 }
