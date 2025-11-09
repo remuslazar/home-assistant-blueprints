@@ -1,0 +1,54 @@
+blueprint:
+  name: KNX → Home Assistant Scene (one-way, knx.telegram)
+  description: >
+    Bind a KNX Scene group address (DPT 18.001) to a Home Assistant Scene.
+    One-way sync: KNX ➜ Home Assistant. When a KNX scene is *recalled* on the
+    specified group address, the selected HA scene is activated. (Ignores learn.)
+  domain: automation
+  author: remus-gpt
+
+  input:
+    knx_scene_address:
+      name: KNX Scene Group Address
+      description: KNX GA that sends the scene recall (e.g., 1/2/3).
+      selector:
+        text:
+          multiline: false
+          placeholder: "1/2/3"
+    ha_scene:
+      name: Home Assistant Scene
+      description: The HA scene to activate when the KNX scene is recalled.
+      selector:
+        entity:
+          domain: scene
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - platform: knx.telegram
+    # Only react to incoming writes on the GA
+    destination: !input knx_scene_address
+    outgoing: false
+    group_value_read: false
+    group_value_response: false
+    id: "knx_scene"
+
+condition:
+  # Ensure it's a Scene DPT (18.xxx)
+  - condition: template
+    value_template: "{{ trigger.dpt_main == 18 }}"
+  # Ignore scene learn telegrams if present (process only recalls)
+  - condition: template
+    value_template: >
+      {{ (trigger.value is not defined)
+         or (trigger.value.learn is not defined)
+         or (trigger.value.learn == false) }}
+  # Only on write telegrams
+  - condition: template
+    value_template: "{{ trigger.telegramtype == 'GroupValueWrite' }}"
+
+action:
+  - service: scene.turn_on
+    target:
+      entity_id: !input ha_scene
