@@ -1,5 +1,5 @@
 blueprint:
-  name: KNX → Home Assistant Scene (one-way, knx.telegram)
+  name: KNX → Home Assistant Scene (one-way)
   description: >
     Bind a KNX Scene group address (DPT 18.001) to a Home Assistant Scene.
     One-way sync: KNX ➜ Home Assistant. When a KNX scene is *recalled* on the
