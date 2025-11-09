@@ -1,9 +1,10 @@
 blueprint:
-  name: KNX → Home Assistant Scene (one-way)
+  name: KNX → Home Assistant Scene
   description: >
-    Bind a KNX Scene group address (DPT 18.001) to a Home Assistant Scene.
-    One-way sync: KNX ➜ Home Assistant. When a KNX scene is *recalled* on the
-    specified group address, the selected HA scene is activated. (Ignores learn.)
+    Bind a KNX Scene GA (DPT 18.001) to a Home Assistant scene.
+    KNX → HA: on KNX scene recall, activate the HA scene (ignores learn).
+    HA → KNX: when the HA scene is turned on, mirror a KNX recall to the GA.
+    No loop because the KNX trigger uses outgoing: false.
   domain: automation
   author: remus-gpt
 
@@ -30,39 +31,74 @@ blueprint:
 mode: single
 max_exceeded: silent
 
+variables:
+  v_knx_scene_number: !input knx_scene_number
+  v_ha_scene: !input ha_scene
+  v_knx_address: !input knx_scene_address
+
 trigger:
-  - platform: knx.telegram
-    # Only react to incoming writes on the GA
+  # KNX → HA (only incoming bus writes; ignores our own sends)
+  - id: knx_in
+    platform: knx.telegram
     destination: !input knx_scene_address
     outgoing: false
     group_value_read: false
     group_value_response: false
-    id: "knx_scene"
 
-variables:
-  knx_scene_number: !input knx_scene_number
+  # HA → KNX (whenever the selected HA scene is turned on)
+  - id: ha_scene_on
+    platform: event
+    event_type: call_service
+    event_data:
+      domain: scene
+      service: turn_on
 
-condition:
-  # Ensure it's a Scene DPT (18.xxx)
-  - condition: template
-    value_template: "{{ trigger.dpt_main == 18 }}"
-  # Ignore scene learn telegrams if present (process only recalls)
-  - condition: template
-    value_template: >
-      {{ (trigger.value is not defined)
-         or (trigger.value.learn is not defined)
-         or (trigger.value.learn == false) }}
-  # Only on write telegrams
-  - condition: template
-    value_template: "{{ trigger.telegramtype == 'GroupValueWrite' }}"
-  # Check that the scene number matches the configured one
-  - condition: template
-    value_template: >
-      {{ trigger.value is defined
-         and trigger.value.scene_number is defined
-         and trigger.value.scene_number == knx_scene_number }}
+condition: []
 
 action:
-  - service: scene.turn_on
-    target:
-      entity_id: !input ha_scene
+  - choose:
+
+      # ===== KNX → HA =====
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'knx_in' }}"
+          - condition: template
+            value_template: "{{ trigger.dpt_main == 18 }}"
+          - condition: template
+            value_template: "{{ trigger.telegramtype == 'GroupValueWrite' }}"
+          - condition: template
+            value_template: >
+              {{ (trigger.value is not defined)
+                 or (trigger.value.learn is not defined)
+                 or (trigger.value.learn == false) }}
+          - condition: template
+            value_template: >
+              {{ trigger.value is defined
+                 and trigger.value.scene_number is defined
+                 and trigger.value.scene_number == v_knx_scene_number }}
+        sequence:
+          - service: scene.turn_on
+            target:
+              entity_id: !input ha_scene
+
+      # ===== HA → KNX =====
+      - conditions:
+          - condition: template
+            value_template: >
+              {% set sd = trigger.event.data.service_data if trigger.id == 'ha_scene_on' else {} %}
+              {% set e = sd.entity_id %}
+              {{ trigger.id == 'ha_scene_on'
+                 and (
+                      (e is string and e == v_ha_scene)
+                      or (e is list and (v_ha_scene in e))
+                 ) }}
+        sequence:
+          # DPT 18.001: 1 byte. bit6=learn (0), bits0..5 = (scene_number - 1)
+          - service: knx.send
+            data:
+              address: !input knx_scene_address
+              payload: >
+                {% set sn = (v_knx_scene_number | int) %}
+                {{ [ ((0 << 6) | (sn - 1)) ] }}
+
+  - default: []
