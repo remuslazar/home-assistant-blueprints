@@ -144,6 +144,7 @@ trigger:
     entity_id: !input light_entity
     id: "light_entity"
   - platform: knx.telegram
+    enabled: "{{ !input switch_address | length == 0  | not }}"
     destination: !input switch_address
     outgoing: false
     group_value_read: false

@@ -83,6 +83,10 @@ action:
 
       # ===== HA → KNX =====
       - conditions:
+          # Only process HA scene events
+          - condition: template
+            value_template: "{{ trigger.id == 'ha_scene_on' }}"
+          
           # Only mirror user/API initiated calls; skip automation-originated ones
           - condition: template
             value_template: >
@@ -92,13 +96,10 @@ action:
  
           - condition: template
             value_template: >
-              {% set sd = trigger.event.data.service_data if trigger.id == 'ha_scene_on' else {} %}
+              {% set sd = trigger.event.data.service_data %}
               {% set e = sd.entity_id %}
-              {{ trigger.id == 'ha_scene_on'
-                 and (
-                      (e is string and e == v_ha_scene)
-                      or (e is list and (v_ha_scene in e))
-                 ) }}
+              {{ (e is string and e == v_ha_scene)
+                 or (e is list and (v_ha_scene in e)) }}
         sequence:
           # DPT 18.001: 1 byte. bit6=learn (0), bits0..5 = (scene_number - 1)
           - service: knx.send
