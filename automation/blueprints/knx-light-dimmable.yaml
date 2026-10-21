@@ -1,61 +1,57 @@
 blueprint:
   name: KNX - Light Control (dimmable)
   description: |
-    Use KNX to control an Home Assistant dimmable light entity
+    Use KNX to control a dimmable Home Assistant light entity: switch, relative
+    dimming (DPT 3.007), absolute brightness (DPT 5.001), with state feedback to
+    KNX. Leave any address empty that the light does not use.
   author: remuslazar
   domain: automation
+  homeassistant:
+    min_version: 2024.10.0
   input:
     light_entity:
-      name: Light Entity
+      name: Light entity
       description: >
-        Choose the light to control and expose with KNX
+        The light to control and expose with KNX.
       selector:
         entity:
           domain: light
     switch_address:
-      name: Switch group addresses (list)
+      name: Switch group addresses
       description: >
-        A list of group addresses for switching the lights on and off. DPT 1.001
-        Examples: ["1/0/1", "1/0/2"] or YAML list on multiple lines.
+        Group addresses that switch the light on and off, DPT 1.001. One address
+        or a list, e.g. ["1/0/1", "0/0/32"]: the light's own address plus any
+        central or floor address it should follow.
       selector:
         object:
       default: []
     switch_state_address:
       name: Switch state group address
       description: >
-        Group address to send feedback of the state of the light. DPT 1.001
-        Example: '1/4/1' (leave empty if unused)
-      default: ""
-
-    dimm_entity:
-      name: Helper for relative dimming function
-      description: >
-        If you intend to use the relative dimming function, it is necessary to manually create a 'toggle helper' specificly for this light (don't change if unused)
-      selector:
-        entity:
-          domain: input_boolean
+        Group address the light's on/off state is sent to, DPT 1.001, e.g.
+        '1/0/2'. Read requests on it are answered.
       default: []
     dimm_address:
       name: Relative dimming group address
       description: >
-        Group address for relative dimming the lights (+/-). DPT 3.007
-        Example: '1/1/1' (leave empty if unused)
-      default: ""
+        Group address for relative dimming (brighter/darker/stop), DPT 3.007,
+        e.g. '1/0/3'.
+      default: []
     value_address:
       name: Absolute dimming group address
       description: >
-        Group address for absolute dimming of the light (0-100%). DPT 5.001
-        Example: '1/2/1' (leave empty if unused)
-      default: ""
+        Group address for an absolute brightness (0-100 %), DPT 5.001, e.g.
+        '1/0/4'. 0 % switches the light off.
+      default: []
     value_state_address:
       name: Brightness state group address
       description: >
-        Group address to send feedback of the brightess of the light. DPT 5.001
-        Example: '1/5/1' (leave empty if unused)
-      default: ""
+        Group address the light's brightness is sent to, DPT 5.001, e.g.
+        '1/0/5'. Read requests on it are answered.
+      default: []
     dimm_time:
-      name: Dimm time
-      description: Time dimming from 0 to 100% shall take.
+      name: Dimming time
+      description: Time a relative dim takes from 0 to 100 %.
       selector:
         number:
           min: 1.0
@@ -65,8 +61,8 @@ blueprint:
           mode: slider
       default: 4
     dimm_steps:
-      name: Dimm steps
-      description: Steps used to dimm from 0 to 100%.
+      name: Dimming steps
+      description: Steps a relative dim from 0 to 100 % is split into.
       selector:
         number:
           min: 2.0
@@ -76,304 +72,256 @@ blueprint:
           mode: slider
       default: 20
     dimm_no_off:
-      name: Disable switch off with dimm down command
-      description: If enabled, the dimm down command won't cause the light to switch off when reaching 0% (keep the light at minimum dimm)
+      name: Dimming down never switches off
+      description: Dimming down stops at the lowest brightness instead of switching the light off.
       selector:
         boolean:
       default: false
     dimm_no_on:
-      name: Disable switch on with dimm up command
-      description: If enabled, the dimm up command won't cause the light to switch on (if it's actual state is off)
+      name: Dimming up never switches on
+      description: Dimming up does nothing while the light is off.
       selector:
         boolean:
       default: false
 
+# parallel: a stop telegram must reach a dimming run that is still going
 mode: parallel
+max: 10
 max_exceeded: silent
+
+# An empty destination would match every group address on the bus, so a
+# trigger whose address is not set is disabled instead.
+trigger_variables:
+  _switch_address: !input switch_address
+  _switch_state_address: !input switch_state_address
+  _dimm_address: !input dimm_address
+  _value_address: !input value_address
+  _value_state_address: !input value_state_address
 
 variables:
   light_entity: !input light_entity
   switch_state_address: !input switch_state_address
-  dimm_entity: !input dimm_entity
-  dimm_address: !input dimm_address
-  value_address: !input value_address
   value_state_address: !input value_state_address
   _dimm_time: !input dimm_time
   _dimm_steps: !input dimm_steps
   dimm_no_off: !input dimm_no_off
   dimm_no_on: !input dimm_no_on
+  has_switch_state: "{{ switch_state_address | count > 0 }}"
+  has_value_state: "{{ value_state_address | count > 0 }}"
   dimm_time: "{{ _dimm_time | float(default=4) }}"
   dimm_steps: "{{ _dimm_steps | int(default=20) }}"
-  dimm_step: "{{ (255 / dimm_steps) | round(0,'ceil') }}"
-  dimm_delay: "{{ dimm_time * 1000 / dimm_steps }}"
-  initial_brightness: "{{ (state_attr(light_entity, 'brightness') | int(default=0)) }}"
+  dimm_step: "{{ (255 / dimm_steps) | round(0, 'ceil') | int }}"
+  dimm_delay: "{{ (dimm_time * 1000 / dimm_steps) | int }}"
+  is_on: "{{ is_state(light_entity, 'on') }}"
+  brightness: "{{ state_attr(light_entity, 'brightness') | int(default=0) if is_on else 0 }}"
 
-trigger:
-  - platform: state
+triggers:
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: state
     entity_id: !input light_entity
-    id: "light_entity"
-  - platform: knx.telegram
+    id: light_entity
+  - trigger: knx.telegram
+    enabled: "{{ _switch_address | count > 0 }}"
     destination: !input switch_address
-    outgoing: false
     type: switch
+    outgoing: false
     group_value_read: false
     group_value_response: false
     id: switch_address
-  - platform: knx.telegram
+  - trigger: knx.telegram
+    enabled: "{{ _switch_state_address | count > 0 }}"
     destination: !input switch_state_address
     outgoing: false
-    type: switch
     group_value_write: false
     group_value_response: false
-    id: switch_state_address
-  - platform: knx.telegram
+    id: switch_state_read
+  - trigger: knx.telegram
+    enabled: "{{ _dimm_address | count > 0 }}"
     destination: !input dimm_address
-    outgoing: false
     type: control_dimming
+    outgoing: false
     group_value_read: false
     group_value_response: false
-    id: "dimm_address"
-  - platform: knx.telegram
+    id: dimm_address
+  - trigger: knx.telegram
+    enabled: "{{ _value_address | count > 0 }}"
     destination: !input value_address
     type: percent
     outgoing: false
     group_value_read: false
     group_value_response: false
-    id: "value_address"
-  - platform: knx.telegram
+    id: value_address
+  - trigger: knx.telegram
+    enabled: "{{ _value_state_address | count > 0 }}"
     destination: !input value_state_address
-    type: percent
     outgoing: false
     group_value_write: false
     group_value_response: false
-    id: "value_state_address"
+    id: value_state_read
 
-action:
+actions:
   - choose:
-    # KNX TELEGRAMS
+      - alias: Switch from KNX
+        conditions:
+          - condition: trigger
+            id: switch_address
+        sequence:
+          - action: "light.turn_{{ 'on' if trigger.value == 'on' else 'off' }}"
+            target:
+              entity_id: "{{ light_entity }}"
 
-    # SWITCH command
-    - conditions:
-        - condition: trigger
-          id: switch_address
-      sequence:
-        action: |
-          {% if trigger.value == "on" %}
-            light.turn_on
-          {% else %}
-            light.turn_off
-          {% endif %}
-        target:
-          entity_id: "{{ light_entity }}"
+      - alias: Absolute brightness from KNX
+        conditions:
+          - condition: trigger
+            id: value_address
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ trigger.value | int(default=0) == 0 }}"
+            then:
+              - action: light.turn_off
+                target:
+                  entity_id: "{{ light_entity }}"
+            else:
+              - action: light.turn_on
+                target:
+                  entity_id: "{{ light_entity }}"
+                data:
+                  brightness_pct: "{{ trigger.value | int }}"
 
-    # SWITCH read
-    - conditions:
-        - condition: trigger
-          id: switch_state_address
-      sequence:
-        - if:
-            - condition: or
-              conditions:
-                - condition: state
-                  entity_id: !input light_entity
-                  state: "off"
-                - condition: state
-                  entity_id: !input light_entity
-                  state: "unavailable"
-                - condition: state
-                  entity_id: !input light_entity
-                  state: "unknown"
-          then:
-            - service: knx.send
-              data:
-                address: "{{ switch_state_address }}"
-                payload: 0
-                response: true
-          else:
-            - service: knx.send
-              data:
-                address: "{{ switch_state_address }}"
-                payload: 1
-                response: true
+      - alias: Relative dimming from KNX
+        conditions:
+          - condition: trigger
+            id: dimm_address
+          # step code 0 is the stop telegram: it ends a running dim through
+          # the wait below and needs nothing of its own
+          - condition: template
+            value_template: "{{ trigger.value.step_code | int(default=0) != 0 }}"
+          - condition: template
+            value_template: >
+              {{ trigger.value.control == 'decrease' or not dimm_no_on or is_on }}
+        sequence:
+          - variables:
+              direction: "{{ 1 if trigger.value.control == 'increase' else -1 }}"
+              max_steps: >
+                {% if direction > 0 %}
+                  {{ ((255 - brightness) / 255 * dimm_steps) | round(0, 'ceil') | int }}
+                {% elif dimm_no_off %}
+                  {{ (([brightness - 1, 0] | max) / 255 * dimm_steps) | round(0, 'ceil') | int }}
+                {% else %}
+                  {{ (brightness / 255 * dimm_steps) | round(0, 'ceil') | int }}
+                {% endif %}
+          - condition: template
+            value_template: "{{ max_steps > 0 }}"
+          - repeat:
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: >
+                        {{ direction < 0 and dimm_no_off and
+                           (state_attr(light_entity, 'brightness') | int(default=255)) - dimm_step < 1 }}
+                  then:
+                    - action: light.turn_on
+                      target:
+                        entity_id: "{{ light_entity }}"
+                      data:
+                        brightness: 1
+                        transition: "{{ dimm_delay / 1000 }}"
+                  else:
+                    - action: light.turn_on
+                      target:
+                        entity_id: "{{ light_entity }}"
+                      data:
+                        brightness_step: "{{ direction * dimm_step }}"
+                        transition: "{{ dimm_delay / 1000 }}"
+                # any further dimming telegram (stop or a new direction) ends
+                # this run; a new direction starts its own run
+                - wait_for_trigger:
+                    - trigger: knx.telegram
+                      destination: !input dimm_address
+                      outgoing: false
+                      group_value_read: false
+                      group_value_response: false
+                  timeout:
+                    milliseconds: "{{ dimm_delay }}"
+                  continue_on_timeout: true
+              until:
+                - condition: template
+                  value_template: "{{ wait.trigger is not none or repeat.index >= max_steps }}"
 
-    # STATE FEEDBACK
-    - conditions:
-        - condition: trigger
-          id: "light_entity"
-      sequence:
-        # SWITCH change
-        - if:
-            - condition: template
-              value_template: "{{ trigger.to_state.state != trigger.from_state.state }}"
-          then:
-            - choose:
-              - conditions:
-                  condition: template
-                  value_template: "{{ trigger.to_state.state == 'off' }}"
-                sequence:
-                  - service: knx.send
-                    data:
-                      address: "{{ switch_state_address }}"
-                      payload: 0
-              - conditions:
-                  condition: template
-                  value_template: "{{ trigger.to_state.state == 'on' }}"
-                sequence:
-                  - service: knx.send
-                    data:
-                      address: "{{ switch_state_address }}"
-                      payload: 1
-        # BRIGHTNESS change
-        - if:
-            - condition: template
-              value_template: "{{ value_state_address != '' }}"
-            - condition: or
-              conditions:
-                - condition: template
-                  value_template: "{{ trigger.to_state.attributes.brightness is defined and trigger.from_state.attributes.brightness is defined and trigger.to_state.attributes.brightness != trigger.from_state.attributes.brightness }}"
-                - condition: template
-                  value_template: "{{ trigger.to_state.attributes.brightness is defined and trigger.from_state.attributes.brightness is not defined }}"
-                - condition: template
-                  value_template: "{{ trigger.from_state.attributes.brightness is defined and trigger.to_state.attributes.brightness is not defined }}"
-          then:
-            - if:
-                - condition: template
-                  value_template: "{{ trigger.to_state.attributes.brightness is defined }}"
-              then:
-                - service: knx.send
-                  data:
-                    address: "{{ value_state_address }}"
-                    payload:
-                      - "{{ trigger.to_state.attributes.brightness | int(default=0) }}"
-              else:
-                - service: knx.send
-                  data:
-                    address: "{{ value_state_address }}"
-                    payload:
-                      - "0"
+      - alias: Answer a switch state read
+        conditions:
+          - condition: trigger
+            id: switch_state_read
+        sequence:
+          - action: knx.send
+            data:
+              address: "{{ switch_state_address }}"
+              payload: "{{ 1 if is_on else 0 }}"
+              response: true
 
-      # BRIGHTNESS read
-    - conditions:
-        - condition: trigger
-          id: "value_state_address"
-      sequence:
-        - service: knx.send
-          data:
-            address: "{{ value_state_address }}"
-            payload:
-              - "{{ state_attr(light_entity, 'brightness') | int(default=0) }}"
-            response: true
-    - conditions:
-        - condition: trigger
-          id: "dimm_address"
-      sequence:
-        - choose:
-            # stop command
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.value.step_code == 0 }}"
-              sequence:
-                - service: input_boolean.turn_on
-                  data: { }
-                  target:
-                    entity_id: !input dimm_entity
-            # start dimm up command
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.value.control == 'increase' }}"
-                - condition: template
-                  value_template: "{{ not dimm_no_on or states(light_entity) != 'off' }}"
-              sequence:
-                - variables:
-                    current_dimm_steps: "{{ ((255 - initial_brightness) / 255 * dimm_steps) | round(0, 'ceil') | int }}"
-                - service: input_boolean.turn_off
-                  data: { }
-                  target:
-                    entity_id: !input dimm_entity
-                - repeat:
-                    while:
-                      - condition: state
-                        entity_id: !input dimm_entity
-                        state: "off"
-                      - condition: template
-                        value_template: "{{ repeat.index <= current_dimm_steps }}"
-                    sequence:
-                      - service: light.turn_on
-                        data:
-                          brightness_step: "{{ dimm_step }}"
-                          transition: "{{ dimm_delay / 1000 }}"
-                        target:
-                          entity_id: "{{ light_entity }}"
-                      - delay:
-                          milliseconds: "{{ dimm_delay }}"
-                - service: input_boolean.turn_off
-                  data: { }
-                  target:
-                    entity_id: !input dimm_entity
-            # start dimm down command
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.value.control == 'decrease' }}"
-              sequence:
-                - variables:
-                    current_dimm_steps: "{% if dimm_no_off %}{{ (([(initial_brightness - 1), 0] | max) / 255 * dimm_steps) | round(0, 'ceil') | int }}{% else %}{{ (initial_brightness / 255 * dimm_steps) | round(0, 'ceil') | int }}{% endif %}"
-                - service: input_boolean.turn_off
-                  data: { }
-                  target:
-                    entity_id: !input dimm_entity
-                - repeat:
-                    while:
-                      - condition: state
-                        entity_id: !input dimm_entity
-                        state: "off"
-                      - condition: template
-                        value_template: "{{ repeat.index <= current_dimm_steps }}"
-                      - condition: template
-                        value_template: "{{ not dimm_no_off or state_attr(light_entity, 'brightness') | int(default=255) != 1 }}"
-                    sequence:
-                      - if:
-                          - condition: template
-                            value_template: "{{ dimm_no_off and (state_attr(light_entity, 'brightness') | int(default=255) - dimm_step) < 1 }}"
-                        then:
-                          - service: light.turn_on
-                            data:
-                              brightness: 1
-                              transition: "{{ dimm_delay / 1000 }}"
-                            target:
-                              entity_id: "{{ light_entity }}"
-                        else:
-                          - service: light.turn_on
-                            data:
-                              brightness_step: "{{ -dimm_step }}"
-                              transition: "{{ dimm_delay / 1000 }}"
-                            target:
-                              entity_id: "{{ light_entity }}"
-                          - delay:
-                              milliseconds: "{{ dimm_delay }}"
-                - service: input_boolean.turn_off
-                  data: { }
-                  target:
-                    entity_id: !input dimm_entity
+      - alias: Answer a brightness read
+        conditions:
+          - condition: trigger
+            id: value_state_read
+        sequence:
+          - action: knx.send
+            data:
+              address: "{{ value_state_address }}"
+              payload: ["{{ brightness }}"]
+              response: true
 
-      # BRIGHTNESS command
-    - conditions:
-        - condition: trigger
-          id: "value_address"
-      sequence:
-        - choose:
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.value == 0 }}"
-              sequence:
-                - service: light.turn_off
-                  target:
-                    entity_id: "{{ light_entity }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.value != 0 }}"
-              sequence:
-                - service: light.turn_on
-                  data:
-                    brightness_pct: "{{ trigger.value }}"
-                  target:
-                    entity_id: "{{ light_entity }}"
+      - alias: Send the state at startup
+        conditions:
+          - condition: trigger
+            id: startup
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ has_switch_state }}"
+            then:
+              - action: knx.send
+                data:
+                  address: "{{ switch_state_address }}"
+                  payload: "{{ 1 if is_on else 0 }}"
+          - if:
+              - condition: template
+                value_template: "{{ has_value_state }}"
+            then:
+              - action: knx.send
+                data:
+                  address: "{{ value_state_address }}"
+                  payload: ["{{ brightness }}"]
+
+      - alias: Send state changes of the light
+        conditions:
+          - condition: trigger
+            id: light_entity
+          - condition: template
+            value_template: "{{ trigger.from_state is not none and trigger.to_state is not none }}"
+        sequence:
+          - variables:
+              old_on: "{{ trigger.from_state.state == 'on' }}"
+              new_on: "{{ trigger.to_state.state == 'on' }}"
+              old_brightness: "{{ trigger.from_state.attributes.brightness | int(default=0) if old_on else 0 }}"
+              new_brightness: "{{ trigger.to_state.attributes.brightness | int(default=0) if new_on else 0 }}"
+          # unavailable/unknown count as off, so a light that drops off the
+          # network shows as off on KNX
+          - if:
+              - condition: template
+                value_template: "{{ has_switch_state and old_on != new_on }}"
+            then:
+              - action: knx.send
+                data:
+                  address: "{{ switch_state_address }}"
+                  payload: "{{ 1 if new_on else 0 }}"
+          - if:
+              - condition: template
+                value_template: "{{ has_value_state and old_brightness != new_brightness }}"
+            then:
+              - action: knx.send
+                data:
+                  address: "{{ value_state_address }}"
+                  payload: ["{{ new_brightness }}"]
