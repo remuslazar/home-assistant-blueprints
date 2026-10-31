@@ -215,41 +215,52 @@ actions:
                 {% endif %}
           - condition: template
             value_template: "{{ max_steps > 0 }}"
+          - variables:
+              released: false
           - repeat:
               sequence:
-                - if:
-                    - condition: template
-                      value_template: >
-                        {{ direction < 0 and dimm_no_off and
-                           (state_attr(light_entity, 'brightness') | int(default=255)) - dimm_step < 1 }}
-                  then:
-                    - action: light.turn_on
-                      target:
-                        entity_id: "{{ light_entity }}"
-                      data:
-                        brightness: 1
-                        transition: "{{ dimm_delay / 1000 }}"
-                  else:
-                    - action: light.turn_on
-                      target:
-                        entity_id: "{{ light_entity }}"
-                      data:
-                        brightness_step: "{{ direction * dimm_step }}"
-                        transition: "{{ dimm_delay / 1000 }}"
-                # any further dimming telegram (stop or a new direction) ends
-                # this run; a new direction starts its own run
-                - wait_for_trigger:
-                    - trigger: knx.telegram
-                      destination: !input dimm_address
-                      outgoing: false
-                      group_value_read: false
-                      group_value_response: false
-                  timeout:
-                    milliseconds: "{{ dimm_delay }}"
-                  continue_on_timeout: true
+                # listen for the release while the light call runs: a Zigbee
+                # light answers only after ~200 ms, and a telegram that comes
+                # in before the wait starts would be missed
+                - parallel:
+                    - if:
+                        - condition: template
+                          value_template: >
+                            {{ direction < 0 and dimm_no_off and
+                               (state_attr(light_entity, 'brightness') | int(default=255)) - dimm_step < 1 }}
+                      then:
+                        - action: light.turn_on
+                          target:
+                            entity_id: "{{ light_entity }}"
+                          data:
+                            brightness: 1
+                            transition: "{{ dimm_delay / 1000 }}"
+                      else:
+                        - action: light.turn_on
+                          target:
+                            entity_id: "{{ light_entity }}"
+                          data:
+                            brightness_step: "{{ direction * dimm_step }}"
+                            transition: "{{ dimm_delay / 1000 }}"
+                    - sequence:
+                        # any further dimming telegram (stop or a new
+                        # direction) ends this run; a new direction starts its
+                        # own run. `wait` stays inside this branch, `released`
+                        # carries the result out
+                        - wait_for_trigger:
+                            - trigger: knx.telegram
+                              destination: !input dimm_address
+                              outgoing: false
+                              group_value_read: false
+                              group_value_response: false
+                          timeout:
+                            milliseconds: "{{ dimm_delay }}"
+                          continue_on_timeout: true
+                        - variables:
+                            released: "{{ wait.trigger is not none }}"
               until:
                 - condition: template
-                  value_template: "{{ wait.trigger is not none or repeat.index >= max_steps }}"
+                  value_template: "{{ released or repeat.index >= max_steps }}"
 
       - alias: Answer a switch state read
         conditions:
